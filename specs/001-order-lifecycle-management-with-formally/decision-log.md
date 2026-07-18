@@ -1,0 +1,37 @@
+# Decision Log: order lifecycle management with formally verified status state machine
+
+**Feature**: `001-order-lifecycle-management-with-formally` | **Created**: 2026-07-18
+
+This log records the human-approved decisions for this feature: the chosen
+workflow track, any opted-in rule extensions, each phase-gate approval, and any
+deviation from the spec or plan made during implementation.
+
+| Date | Stage | Decision | Rationale | Approved by |
+|---|---|---|---|---|
+| 2026-07-18 | Route | Track D — Complex | New service capability with concurrency (at-least-once, out-of-order, concurrent updates), persistence, and dual formal-verification obligations (TLA+ + Lean 4) — full pipeline at max depth, ADR for the state-machine/concurrency design | sapb2004@gmail.com |
+| 2026-07-18 | Extensions | Opted in: security/baseline → .agents/extensions/security/baseline/security-baseline.md (SEC-01..07) | Feature accepts status updates from upstream systems at an API boundary (external input) and persists order/audit data | sapb2004@gmail.com |
+| 2026-07-18 | Specify | spec.md approved | 6 clarifications resolved (inventory-release-is-external-API, no auth/authz for now, 1s latency NFR, no at-rest encryption, history entry = order/status/timestamp only, liveness added as [US4] formal obligation) plus a follow-up scalability clarification (no volume/throughput target). Note: no-auth decision is a deliberate, recorded deviation from opted-in SEC-02 | sapb2004@gmail.com |
+| 2026-07-18 | Plan | plan.md approved | All 3 constitution gates PASS (Simplicity, Anti-abstraction, Isolation); no Complexity Tracking entries. Concurrency arbitrated via JPA `@Version` optimistic locking; formal split confirmed (Lean 4 → `Proofs/OrderTransition.lean` for [US1]; TLA+ → `Specs/OrderLifecycle.tla`/`.cfg` for [US2/US3/US4]); inventory release as single concrete `InventoryReleaseClient` (no interface, per Article V). SEC-01/03/05/06/07 pass; SEC-02 recorded deviation; SEC-04 N/A | sapb2004@gmail.com |
+| 2026-07-18 | Tasks | tasks.md approved | 43 tasks across 4 user stories (US1/US2/US3 P1, US4 P2), 20 marked [P]. Formal-verification pairs: T017a/T017b (lean4-theorem-writer/lean4-verifier → Proofs/OrderTransition.lean) for [US1]; T034a/T034b (tlaplus-spec-writer/tlaplus-verifier → Specs/OrderLifecycle.tla/.cfg) for [US2/US3/US4] safety+liveness. No SEC-02 task by design (deviation already recorded upstream) | sapb2004@gmail.com |
+| 2026-07-18 | Tasks (amendment) | tasks.md re-approved | T037 amended to fold in a manual spot-check of the 1s Performance NFR (per analyze's Should-fix) — no automated integration test, no Spring context load, per human's explicit constraint (Article IV mock-only isolation) | sapb2004@gmail.com |
+| 2026-07-18 | Analyze | Implementation-ready | 2 loop iterations. Pass 1: 1 Should-fix (Performance NFR untraced) + 2 Notes (missing ADR vs. Route rationale; SEC-02 not echoed in plan.md body). Both fixable items closed (T037 amended; ADR-0001 created). Pass 2: 0 Blockers, 0 Should-fix, 1 Note carried forward (SEC-02 not echoed in plan.md — human's deliberate no-action call) | sapb2004@gmail.com |
+| 2026-07-18 | Tests (red) — US1 | 8 tests confirmed failing for the right reason | `OrderServiceTest` covers all 5 US1 acceptance scenarios (create→NEW, every legal forward edge, illegal-jump rejection, terminal CLOSED/CANCELLED rejection, get-current-state); confirmed red via compile failure (production classes don't exist yet), not a test bug. test-writer's background run hit a session usage limit mid-report; test file was already written and its red state independently re-confirmed by re-running the test | sapb2004@gmail.com |
+| 2026-07-18 | Tests (red) — Foundational T003 + US1 T013 | 15 tests confirmed failing for the right reason | `OrderLifecycleTest` (T003, 8 tests, exhaustive 7×7 edge admission) and `OrderControllerTest` (T013, 7 tests, all 3 endpoints + illegal/not-found paths), both red via missing-symbol compile failure. test-writer flagged 2 naming choices for implementor to adopt or revise: `OrderLifecycle.isLegalTransition(OrderStatus from, OrderStatus to): boolean`, and a new `com.formalmethods.service.OrderNotFoundException` (not previously named in plan.md) for the 404 path | sapb2004@gmail.com |
+| 2026-07-18 | Implement — US1 (code) | Setup/Foundational/US1 code green (T001-T017) | implementor built all production classes; found a real arithmetic bug during T003's run — plan.md/tasks.md's "six forward edges" wording miscounted the 6-state chain (should be 5 edges), which propagated into OrderLifecycleTest's hardcoded edge-count assertion (9 instead of correct 8 = 5 forward + 3 cancel). Human confirmed 8 is correct; fixed in all 3 places (test assertion 9→8 + rename, plan.md line 54, tasks.md T003/T017a) without reopening either document's Approved status (wording-only, no scope change). All 23 tests (T003+T012+T013) now green; Checkstyle clean | sapb2004@gmail.com |
+| 2026-07-18 | Implement — US1 (formal, T017a/T017b) | [US1] Lean 4 proof verified | lean4-theorem-writer drafted Proofs/OrderTransition.lean (5 theorems: exact-8-edges, edge count, both terminal states' zero-outdegree, no-cancel-edge-from-DISPATCHED-or-later), with a correspondence mapping to OrderLifecycle.isLegalTransition. First verify found 1 unresolved goal (legal_edge_count_is_eight missing a closing rfl after rw); 1 revision round fixed it. Re-verify: exit 0, no sorry/admit, all 5 theorems proven | sapb2004@gmail.com |
+| 2026-07-18 | Review — US1 | approve | code-reviewer round 1: request-changes (2 Blockers: defect — OrderService missing @Service, app couldn't boot; coverage — 74% vs 90% floor). Human deferred the coverage Blocker to Phase 7/T038 per tasks.md's own sequencing (floor applies once all 4 stories exist). debugger fixed the @Service defect + a Should-fix (stale edge-count Javadoc in OrderLifecycle.java). Re-check: both resolved, formal correspondence re-verified independently, verdict approve | sapb2004@gmail.com |
+
+## Notes
+
+<!-- Optional free-text for anything that doesn't fit a row: a rejected
+     alternative worth remembering, a risk accepted knowingly, a link to an ADR
+     this feature triggered. Delete if unused. -->
+
+- 2026-07-18 — Analyze (Phase 3.5, first pass) found 1 Should-fix (Performance
+  NFR had no task/traceability) and 2 advisory Notes (missing ADR vs. Route
+  rationale; SEC-02 deviation not echoed in plan.md's body). Human directed:
+  close the Should-fix via T037 (manual local-run spot-check, no automated
+  integration test / no Spring context load) and create the promised ADR.
+  ADR-0001 (`docs/adr/0001-use-jpa-version-optimistic-locking-to-arbitrate-concurrent-order-status-updates.md`)
+  now records the `@Version` optimistic-locking concurrency-arbitration
+  decision, closing that Note.
