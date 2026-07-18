@@ -171,4 +171,57 @@ class OrderControllerTest {
         mockMvc.perform(get("/api/orders/{orderId}", orderId))
                 .andExpect(status().isNotFound());
     }
+
+    /**
+     * US2 Acceptance Scenario 1/2 / FR-005/FR-006: {@code POST
+     * /api/orders/{orderId}/cancel} against an order the service accepts
+     * for cancellation returns 200 with the now-CANCELLED order, per
+     * plan.md's REST surface ("200 OK when cancelled ... or an idempotent
+     * repeat"). Matters because this is the only externally observable
+     * confirmation that a cancel (with or without an inventory release)
+     * actually took effect.
+     */
+    @Test
+    void cancelOrderReturns200WithCancelledOrder() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        when(orderService.cancel(orderId)).thenReturn(orderWithStatus(orderId, OrderStatus.CANCELLED));
+
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", orderId).contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    /**
+     * US2 Acceptance Scenario 4 / FR-011: repeating a cancel against an
+     * order already CANCELLED still returns 200 (idempotent no-op), not an
+     * error. Matters because a client re-delivering a cancel request (at-
+     * least-once semantics, FR-011) must see success both times, not a
+     * spurious failure on the second call.
+     */
+    @Test
+    void repeatedCancelOnAlreadyCancelledOrderReturns200() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        when(orderService.cancel(orderId)).thenReturn(orderWithStatus(orderId, OrderStatus.CANCELLED));
+
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", orderId).contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    /**
+     * US2 Acceptance Scenario 3 / FR-005: {@code POST
+     * /api/orders/{orderId}/cancel} against an order the service rejects
+     * (e.g. already DISPATCHED) returns 409 per plan.md's exact HTTP
+     * mapping ("409 cancel at/after DISPATCHED or on CLOSED"). Matters
+     * because a client must be able to distinguish "cancel was too late" from
+     * success (200) or an unrelated server error (500).
+     */
+    @Test
+    void cancelOrderAtOrAfterDispatchedReturns409() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        when(orderService.cancel(orderId)).thenThrow(new IllegalTransitionException("cancel rejected"));
+
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", orderId).contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isConflict());
+    }
 }

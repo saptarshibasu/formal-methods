@@ -3,6 +3,8 @@ package com.formalmethods.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,11 +39,14 @@ class OrderServiceTest {
     @Mock
     private StatusHistoryRepository statusHistoryRepository;
 
+    @Mock
+    private InventoryReleaseClient inventoryReleaseClient;
+
     private OrderService orderService;
 
     @BeforeEach
     void setUp() {
-        orderService = new OrderService(orderRepository, statusHistoryRepository);
+        orderService = new OrderService(orderRepository, statusHistoryRepository, inventoryReleaseClient);
     }
 
     private static Order orderWithStatus(OrderStatus status) {
@@ -216,5 +221,98 @@ class OrderServiceTest {
         Order fetched = orderService.getOrder(orderId);
 
         assertThat(fetched.getStatus()).isEqualTo(OrderStatus.PROVISIONED);
+    }
+
+    /**
+     * US2 Acceptance Scenario 1 / FR-005/FR-006: given an order in NEW,
+     * cancelling it moves the current state to CANCELLED and does NOT invoke
+     * the inventory release client. Matters because inventory was never
+     * reserved for a NEW order — an unconditional release call here would
+     * be a spurious external side effect against a reservation that does
+     * not exist.
+     */
+    @Test
+    void cancelOrderInNewStateMovesToCancelledWithoutInventoryRelease() {
+        Order order = orderWithStatus(OrderStatus.NEW);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Order cancelled = orderService.cancel(orderId);
+
+        assertThat(cancelled.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(inventoryReleaseClient, never()).release(any(UUID.class));
+    }
+
+    /**
+     * US2 Acceptance Scenario 2 / FR-005/FR-006: given an order that has
+     * reached INVENTORY_RESERVED or PROVISIONED (inventory already
+     * reserved), cancelling it moves the current state to CANCELLED and
+     * invokes the inventory release client exactly once. Matters because
+     * FR-006 requires the release call for every pre-DISPATCHED state at or
+     * after INVENTORY_RESERVED, not just the first one — missing the
+     * PROVISIONED case would leave reserved stock silently un-released.
+     */
+    @ParameterizedTest
+    @MethodSource("qualifyingCancelStates")
+    void cancelOrderWithReservedInventoryMovesToCancelledAndReleasesExactlyOnce(OrderStatus from) {
+        Order order = orderWithStatus(from);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Order cancelled = orderService.cancel(orderId);
+
+        assertThat(cancelled.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(inventoryReleaseClient, times(1)).release(orderId);
+    }
+
+    private static Stream<Arguments> qualifyingCancelStates() {
+        return Stream.of(
+                Arguments.of(OrderStatus.INVENTORY_RESERVED),
+                Arguments.of(OrderStatus.PROVISIONED));
+    }
+
+    /**
+     * US2 Acceptance Scenario 3 / FR-005: given an order in DISPATCHED,
+     * requesting cancellation is rejected and the state remains DISPATCHED,
+     * with no inventory release invoked. Matters because DISPATCHED is the
+     * spec's explicit cutoff ("cancellation at or after DISPATCHED MUST be
+     * rejected") — accepting it here would let an order already in the
+     * courier's hands be silently cancelled after the fact.
+     */
+    @Test
+    void cancelOrderInDispatchedIsRejectedAndStateUnchanged() {
+        Order order = orderWithStatus(OrderStatus.DISPATCHED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.cancel(orderId))
+                .isInstanceOf(IllegalTransitionException.class);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.DISPATCHED);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(inventoryReleaseClient, never()).release(any(UUID.class));
+    }
+
+    /**
+     * US2 Acceptance Scenario 4 / FR-011 (idempotency edge case): given an
+     * order already in CANCELLED, requesting cancellation again leaves the
+     * state at CANCELLED, does not throw, and does not invoke a second
+     * inventory release. Matters because spec.md's Edge Cases explicitly
+     * calls out "a cancel arriving after the order is already CANCELLED...
+     * never re-releasing inventory" — without this guarantee a re-delivered
+     * cancel request could double-release inventory that was already freed.
+     */
+    @Test
+    void cancelAlreadyCancelledOrderIsIdempotentWithNoSecondRelease() {
+        Order order = orderWithStatus(OrderStatus.CANCELLED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        Order result = orderService.cancel(orderId);
+
+        assertThat(result.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(inventoryReleaseClient, never()).release(any(UUID.class));
     }
 }

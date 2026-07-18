@@ -59,10 +59,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Create concrete `InventoryReleaseClient` (single method `release(UUID orderId)`, logs the release, no-op body; no interface per constitution Article V) in `src/main/java/com/formalmethods/service/InventoryReleaseClient.java`.
-- [ ] T021 [US2] Implement `OrderService.cancel` in `OrderService.java`, invoking `InventoryReleaseClient.release` exactly once only for a qualifying cancellation (FR-005/006) (depends on T018/T019 red, T020).
-- [ ] T022 [US2] Implement `POST /api/orders/{orderId}/cancel` endpoint in `OrderController.java` (200 on accept/idempotent repeat, 409 on illegal cancel) (depends on T021).
-- [ ] T023 [US2] Extend SLF4J logging to cover cancellations and inventory-release invocations (FR-018, SEC-07) (depends on T021).
+- [x] T020 [P] [US2] Create concrete `InventoryReleaseClient` (single method `release(UUID orderId)`, logs the release, no-op body; no interface per constitution Article V) in `src/main/java/com/formalmethods/service/InventoryReleaseClient.java`.
+- [x] T021 [US2] Implement `OrderService.cancel` in `OrderService.java`, invoking `InventoryReleaseClient.release` exactly once only for a qualifying cancellation (FR-005/006) (depends on T018/T019 red, T020).
+- [x] T022 [US2] Implement `POST /api/orders/{orderId}/cancel` endpoint in `OrderController.java` (200 on accept/idempotent repeat, 409 on illegal cancel) (depends on T021).
+- [x] T023 [US2] Extend SLF4J logging to cover cancellations and inventory-release invocations (FR-018, SEC-07) (depends on T021).
 
 **Checkpoint**: User Stories 1 and 2 both work independently.
 

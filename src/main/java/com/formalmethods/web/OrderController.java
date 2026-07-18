@@ -16,7 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * REST surface for User Story 1 (plan.md's REST surface section):
- * create, apply a status update, and read current state.
+ * create, apply a status update, and read current state — and User Story 2:
+ * cancel.
  */
 @RestController
 @RequestMapping("/api/orders")
@@ -45,6 +46,12 @@ public class OrderController {
     @GetMapping("/{orderId}")
     public ResponseEntity<OrderResponse> getOrder(@PathVariable UUID orderId) {
         OrderResponse response = OrderResponse.from(orderService.getOrder(orderId));
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<OrderResponse> cancelOrder(@PathVariable UUID orderId) {
+        OrderResponse response = OrderResponse.from(orderService.cancel(orderId));
         return ResponseEntity.ok(response);
     }
 }

@@ -118,3 +118,26 @@ Hibernate's JDBC-dialect-detection stage and fails only there
 "no local Postgres" environment limitation, not a context-startup defect —
 confirms the `@Service` fix actually resolves the reported bean-wiring
 failure.
+
+## 2026-07-18 — implementor — T020/T021/T022/T023
+
+US2 (cancel) came together with no surprises: `OrderLifecycle.isLegalTransition`
+already encodes exactly the three cancel edges ({NEW, INVENTORY_RESERVED,
+PROVISIONED}→CANCELLED), so `OrderService.cancel` reuses it directly for the
+"is this cancel legal" check — DISPATCHED/DELIVERED/CLOSED/CANCELLED are
+already correctly excluded by that table with zero new cancel-specific
+branching. The one thing that needs its own branch ahead of the legality
+check is the already-CANCELLED idempotent no-op (FR-011): since there's no
+CANCELLED→CANCELLED self-edge in the transition table, running the legality
+check first would misclassify a repeat cancel as illegal, so the idempotency
+check on `order.getStatus() == CANCELLED` must come *before*
+`isLegalTransition`, not after. `InventoryReleaseClient` is annotated
+`@Component` (not `@Service`) since it's a client/gateway-style seam rather
+than a domain service — consistent with the prior entry's `@Service` fix for
+`OrderService` itself, which is the actual domain service.
+
+Also: `ApiExceptionHandler`'s existing `IllegalTransitionException` → 409
+mapping (already in place from US1/T016) needed zero changes for the cancel
+endpoint — `OrderService.cancel` reuses the same exception type, so the
+mapping was already generic enough to cover both endpoints. No deviation
+from plan.md.

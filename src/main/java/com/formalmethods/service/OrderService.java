@@ -14,7 +14,8 @@ import org.springframework.stereotype.Service;
 /**
  * Order lifecycle operations for User Story 1 — create and advance an order
  * one legal step at a time (FR-001/002/003/004/009), admitting only
- * transitions {@link OrderLifecycle} legalizes.
+ * transitions {@link OrderLifecycle} legalizes — and User Story 2 — cancel
+ * an order with an exactly-once inventory release (FR-005/006).
  */
 @Service
 public class OrderService {
@@ -23,10 +24,13 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final StatusHistoryRepository statusHistoryRepository;
+    private final InventoryReleaseClient inventoryReleaseClient;
 
-    public OrderService(OrderRepository orderRepository, StatusHistoryRepository statusHistoryRepository) {
+    public OrderService(OrderRepository orderRepository, StatusHistoryRepository statusHistoryRepository,
+            InventoryReleaseClient inventoryReleaseClient) {
         this.orderRepository = orderRepository;
         this.statusHistoryRepository = statusHistoryRepository;
+        this.inventoryReleaseClient = inventoryReleaseClient;
     }
 
     /** FR-001: creates a new order, starting in state NEW. */
@@ -68,6 +72,47 @@ public class OrderService {
     /** FR-009: returns the order's single current lifecycle state. */
     public Order getOrder(UUID orderId) {
         return findOrThrow(orderId);
+    }
+
+    /**
+     * FR-005/006: cancels an order at any point strictly before DISPATCHED,
+     * releasing inventory reserved at INVENTORY_RESERVED or later
+     * (pre-DISPATCHED) exactly once. A repeat cancel on an already-CANCELLED
+     * order is an idempotent no-op — no second release, no exception
+     * (FR-011, spec.md Edge Cases). A cancel at or after DISPATCHED is
+     * rejected, leaving the order's current state unchanged.
+     */
+    public Order cancel(UUID orderId) {
+        Order order = findOrThrow(orderId);
+
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            LOG.info("action=cancel order={} outcome=accepted(idempotent) resultStatus=CANCELLED", orderId);
+            return order;
+        }
+
+        if (!OrderLifecycle.isLegalTransition(order.getStatus(), OrderStatus.CANCELLED)) {
+            LOG.warn("action=cancel order={} from={} outcome=rejected", orderId, order.getStatus());
+            throw new IllegalTransitionException(
+                    "illegal cancel from " + order.getStatus());
+        }
+
+        boolean shouldReleaseInventory = order.getStatus() == OrderStatus.INVENTORY_RESERVED
+                || order.getStatus() == OrderStatus.PROVISIONED;
+
+        order.setStatus(OrderStatus.CANCELLED);
+        order.setUpdatedAt(Instant.now());
+        Order saved = orderRepository.save(order);
+
+        if (shouldReleaseInventory) {
+            inventoryReleaseClient.release(orderId);
+            LOG.info("action=cancel order={} outcome=accepted resultStatus=CANCELLED inventoryReleased=true",
+                    orderId);
+        } else {
+            LOG.info("action=cancel order={} outcome=accepted resultStatus=CANCELLED inventoryReleased=false",
+                    orderId);
+        }
+
+        return saved;
     }
 
     private Order findOrThrow(UUID orderId) {
