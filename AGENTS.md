@@ -1,12 +1,16 @@
-# AGENTS.md — verification-service
+# AGENTS.md — formal-methods
 
 ## What this is
 
-Java 17 / Spring Boot 3.2 service that tracks formal-methods verification
-jobs (Lean 4 proofs, TLA+ specs) persisted to PostgreSQL via Spring Data JPA.
-It does not run the verifiers itself — see Article I in the constitution.
-This repo is also the home of its own spec-driven-development agent/skill
-kit (`.agents/`, mirrored to `.claude/`, `.codex/`, `.github/`).
+Java 17 / Spring Boot 3.2 service skeleton — its business domain hasn't been
+decided yet, so don't assume or prescribe one. What's already established:
+persistence via PostgreSQL/Spring Data JPA, and Lean 4 / TLA+ as a
+cross-cutting formal-verification feedback harness for spec-driven
+development, used via the framework's coding-assistant agents rather than
+run by the service itself (see Article I in the constitution) — that harness
+applies to whatever domain gets built here, it isn't the domain. This repo is
+also the home of its own spec-driven-development agent/skill kit (`.agents/`,
+mirrored to `.claude/`, `.codex/`, `.github/`).
 
 ## Always-on context
 
@@ -22,7 +26,7 @@ inherits these; they are never optional and are not repeated in this file.
   on; a complexity finding now fails this command, not just a broken
   compile/test). Coverage is **not** part of this command — see below.
 - Test (all): `./gradlew test`
-- Test (single class): `./gradlew test --tests "com.formalmethods.verification.service.VerificationOrchestrationServiceTest"`
+- Test (single class): `./gradlew test --tests "<fully.qualified.ClassName>"`
 - Test (quiet, agent-preferred): `scripts/quiet.sh ./gradlew test` (or
   `scripts/quiet.ps1` on PowerShell) — condenses output to pass/fail + first
   relevant error; agents should run build/test through this form to keep raw
@@ -47,10 +51,9 @@ inherits these; they are never optional and are not repeated in this file.
 
 - Java 17, Gradle 8.7 (wrapper committed — `./gradlew`, no local Gradle install required)
 - Spring Boot 3.2.5 — Web, Data JPA, Validation, Actuator
-- PostgreSQL via Spring Data JPA + Flyway (`flyway-core` only — Spring Boot
-  3.2.x manages Flyway 9.x, which bundles Postgres support directly; the
-  separate `flyway-database-postgresql` module doesn't exist until Flyway 10 /
-  Spring Boot 3.3+, and pulling it in here fails dependency resolution)
+- PostgreSQL via Spring Data JPA — no schema-migration tool; the schema is
+  created manually in the developer's local database, and Hibernate
+  (`ddl-auto: validate`) only checks entity mappings against it
 - Lombok for entity/DTO boilerplate (`@Getter`/`@Setter`/`@NoArgsConstructor`)
 - JUnit 5 + AssertJ + Mockito for tests — no Testcontainers, no embedded DB
   (see constitution Article IV)
@@ -60,12 +63,11 @@ inherits these; they are never optional and are not repeated in this file.
 
 ## Project Structure
 
-- `src/main/java/com/formalmethods/verification/` — `domain/` (JPA
-  entities), `dto/` (request/response records), `repository/` (Spring Data
-  interfaces), `service/` (orchestration + exceptions), `web/` (REST
-  controller + error handling), `config/` (JPA auditing)
-- `src/main/resources/` — `application.yml`, Flyway migrations in
-  `db/migration/`
+- `src/main/java/com/formalmethods/` — currently just `Application.java`
+  (Spring Boot bootstrap); new code goes in a
+  `domain`/`dto`/`repository`/`service`/`web`/`config` layer per the
+  package-by-layer convention below, not a new top-level package
+- `src/main/resources/` — `application.yml`
 - `src/test/java/...` — unit tests, package-mirrored to `src/main`
 - `.agents/agents/` — canonical coding-assistant agent definitions (single
   source of truth); mirrored to `.claude/agents/`, `.codex/agents/`,
@@ -86,15 +88,9 @@ inherits these; they are never optional and are not repeated in this file.
 
 ## Code Style
 
-```java
-public VerificationOrchestrationService(VerificationJobRepository jobRepository) {
-    this.jobRepository = jobRepository;
-}
-```
-
 - Constructor injection only — no field injection (`@Autowired` on a field),
   anywhere in this codebase.
-- Package-by-layer under `com.formalmethods.verification`: `domain`, `dto`,
+- Package-by-layer under `com.formalmethods`: `domain`, `dto`,
   `repository`, `service`, `web`, `config` — a new class goes in the layer it
   belongs to, not a new top-level package.
 - Lombok (`@Getter @Setter @NoArgsConstructor @EqualsAndHashCode(of = "id")
@@ -107,7 +103,7 @@ public VerificationOrchestrationService(VerificationJobRepository jobRepository)
 No commits exist yet in this repo, so there is no established convention to
 observe — the following is a proposed default, not an inferred fact:
 
-- Branch naming: `<type>/<short-description>` (e.g. `feat/verification-job-listing`)
+- Branch naming: `<type>/<short-description>` (e.g. `feat/short-description`)
 - Commit message format: Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, ...)
 - PR requirements: `./gradlew build` (compile + test + Checkstyle) passes
   locally, and `./gradlew jacocoTestCoverageVerification` meets the coverage
@@ -126,7 +122,6 @@ observe — the following is a proposed default, not an inferred fact:
 **⚠️ Ask first** — high-impact but not categorically forbidden:
 - Adding a new Gradle dependency or plugin.
 - Changing the Spring Boot or Gradle wrapper version.
-- Modifying an already-applied Flyway migration (add a new one instead).
 - Reintroducing Docker, Testcontainers, or any tool-execution capability
   (e.g. shelling out to `lean`/`lake`/TLC) into this Java service — this
   project deliberately keeps that outside the service; see constitution
@@ -144,45 +139,6 @@ observe — the following is a proposed default, not an inferred fact:
   the framework's coding-assistant agents (`lean4-verifier`,
   `tlaplus-verifier`, `lean4-theorem-writer`, `tlaplus-spec-writer`), not to
   this service. See constitution Article I and Article V.
-
-## Conventions (rule + reason)
-
-- Persist and query only through Spring Data JPA repository interfaces
-  (`VerificationJobRepository`, `VerificationResultRepository`) — never raw
-  JDBC/SQL or an `EntityManager` in `service`/`web` code — keeps every query
-  declared in one place and testable via a mocked repository.
-- New filtered-list query needs → add a derived-query method to the
-  repository interface, don't filter `findAll()` in application code (see
-  `VerificationOrchestrationService.listJobs`, which already does this for
-  `sensorType`/`status`).
-
-## Performance & Efficiency
-
-- **Batch/bulk over row-by-row.** `VerificationJob.results` is `EAGER` +
-  `@BatchSize(size = 20)` specifically so a job-list response costs one
-  extra `IN (...)` query instead of N+1 (documented inline in
-  `VerificationJob.java`) — don't switch it to `LAZY` without solving that
-  same problem a different way.
-- **Filter in the query, not in memory.** `listJobs`'s `sensorType`/`status`
-  filters are repository derived-query methods, not a `findAll()` +
-  in-memory `.filter()` — keep new list filters the same shape as the
-  dataset grows.
-- No dedicated null-safety utility is in place yet beyond Bean Validation
-  (`@Valid`) at the request boundary (`CreateVerificationJobRequest`) — this
-  is the only null-handling convention currently established.
-
-## Domain Language
-
-`VerificationJob` (the submitted proof/spec plus its lifecycle `status`) and
-`VerificationResult` (one pass/fail reading appended to a job by whichever
-process ran the check) are distinct entities, not synonyms — a job
-accumulates results over multiple runs, it doesn't become one.
-
-`SensorType` (the Java enum naming which tool a job is checked with) and an
-`.agents/agents/*.md` **agent** (a coding-assistant configuration) are
-related but different concepts: a `SensorType` value is domain data stored
-on a `VerificationJob`; the agent is what actually performs the check. Don't
-conflate "add a sensor type" with "add an agent" — see constitution Article I.
 
 ## Specs
 
@@ -220,10 +176,9 @@ conflate "add a sensor type" with "add an agent" — see constitution Article I.
 - Test location mirrors `src/main`: a class at
   `src/main/java/.../service/Foo.java` gets its test at
   `src/test/java/.../service/FooTest.java`.
-- Mock at the repository boundary (see
-  `VerificationOrchestrationServiceTest`, which mocks
-  `VerificationJobRepository` with Mockito) — no real database, no
-  Testcontainers, per constitution Article IV.
+- Mock at the repository boundary (Spring Data JPA interfaces, via
+  Mockito) — no real database, no Testcontainers, per constitution
+  Article IV.
 
 ## Formal Verification Tooling
 

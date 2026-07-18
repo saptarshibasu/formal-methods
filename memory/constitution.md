@@ -1,4 +1,4 @@
-# verification-service Constitution
+# formal-methods Constitution
 
 <!--
 Sync Impact Report:
@@ -17,11 +17,14 @@ Sync Impact Report:
 
 ## Core Principles
 
-### Article I — Verification Execution Lives Outside This Service
+### Article I — Formal-Verification Tool Execution Lives Outside This Service
 
-This service creates, stores, and lists `VerificationJob`s. It never itself
-invokes an external verification tool (`lean`/`lake`, TLC/`tla2tools.jar`, or
-any future tool). Running a proof or model-check happens exclusively through
+Lean 4 and TLA+ are used as a cross-cutting, domain-independent feedback
+harness for spec-driven development — not evidence of what business domain
+this service serves. Whatever that domain turns out to be, this service
+never itself invokes an external verification tool (`lean`/`lake`,
+TLC/`tla2tools.jar`, or any future tool). Running a proof or model-check
+happens exclusively through
 the framework's coding-assistant agents (`lean4-verifier`,
 `tlaplus-verifier`, and the agents that draft proofs/specs,
 `lean4-theorem-writer`/`tlaplus-spec-writer`) — never through a Java class
@@ -73,15 +76,15 @@ Unit and service-level tests mock at the repository boundary (Spring Data
 JPA interfaces) — never a real PostgreSQL instance, embedded database, or
 Testcontainers. This project runs no Docker/container tooling (Additional
 Constraints), so no automated test may depend on one being available.
-Verifying real Postgres/Flyway compatibility (schema migration + entity
-mapping consistency) is done by running the service locally against a
-developer's own PostgreSQL instance, not as part of the automated suite.
+Verifying real PostgreSQL compatibility (schema and entity-mapping
+consistency) is done by running the service locally against a developer's
+own PostgreSQL instance, not as part of the automated suite.
 
 **Rationale**: The project's explicit no-Docker constraint removes
 Testcontainers as an option; mocking at the repository boundary keeps the
 suite fast and runnable anywhere Java 17 runs, at the cost of not
-mechanically verifying the Flyway migration against a real database on every
-run — a tradeoff made deliberately, not by omission.
+mechanically verifying the schema against a real database on every run — a
+tradeoff made deliberately, not by omission.
 
 ### Article V — Simplicity / Anti-Abstraction
 
@@ -154,4 +157,4 @@ Versioning policy (semantic):
 - **PATCH**: clarifications, wording fixes, typo corrections, non-semantic
   refinements.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-17 | **Last Amended**: 2026-07-18
+**Version**: 1.2.0 | **Ratified**: 2026-07-17 | **Last Amended**: 2026-07-18

@@ -1,29 +1,24 @@
 spring:
   application:
-    name: verification-service
+    name: formal-methods
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/verification}
-    username: ${SPRING_DATASOURCE_USERNAME:verification}
-    password: ${SPRING_DATASOURCE_PASSWORD:verification}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/formal_methods}
+    username: ${SPRING_DATASOURCE_USERNAME:formal_methods}
+    password: ${SPRING_DATASOURCE_PASSWORD:formal_methods}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     open-in-view: false
     hibernate:
-      # Flyway owns the schema (db/migration); Hibernate only validates it matches
-      # the entity mappings at startup instead of generating/altering DDL itself.
+      # No migration tool manages the schema; Hibernate only validates that the
+      # database matches the entity mappings at startup instead of generating DDL.
       ddl-auto: validate
     properties:
       hibernate:
         format_sql: true
         jdbc:
           time_zone: UTC
-
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
-    baseline-on-migrate: true
 
 server:
   port: ${SERVER_PORT:8080}
@@ -39,4 +34,4 @@ management:
 
 logging:
   level:
-    com.formalmethods.verification: INFO
+    com.formalmethods: INFO

@@ -8,7 +8,7 @@ plugins {
 
 group = 'com.formalmethods'
 version = '0.1.0'
-description = 'Spring Boot service that tracks formal-methods verification jobs (Lean 4 proofs, TLA+ specs) persisted to PostgreSQL via Spring Data JPA.'
+description = 'Spring Boot service skeleton; business domain not yet decided. Lean 4 / TLA+ (via the framework coding-assistant agents) act as a cross-cutting spec-driven-development feedback harness, independent of whatever domain is chosen.'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -34,12 +34,6 @@ dependencies {
 
     // PostgreSQL driver
     runtimeOnly 'org.postgresql:postgresql'
-
-    // Flyway: versioned schema migrations against PostgreSQL. Spring Boot 3.2.x
-    // manages Flyway 9.x, which bundles Postgres support directly in flyway-core —
-    // the separate flyway-database-postgresql module only exists from Flyway 10
-    // (Spring Boot 3.3+), so it isn't needed (or resolvable) here.
-    implementation 'org.flywaydb:flyway-core'
 
     // Boilerplate reduction for entities/DTOs
     compileOnly 'org.projectlombok:lombok'

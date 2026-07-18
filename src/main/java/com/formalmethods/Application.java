@@ -1,4 +1,4 @@
-package com.formalmethods.verification;
+package com.formalmethods;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

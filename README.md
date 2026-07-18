@@ -1,31 +1,28 @@
-# verification-service
+# formal-methods
 
-Spring Boot service that tracks formal-methods verification jobs. A client
-submits a proof (`.lean`) or a spec (`.tla` + `.cfg`) as a `VerificationJob`,
-and it's persisted to PostgreSQL via Spring Data JPA. Actual verification —
-running Lean 4 or TLC against the submitted source — happens outside this
-service, via the framework's coding-assistant agents (see **Related** below).
+Spring Boot service skeleton persisted to PostgreSQL via Spring Data JPA —
+its business domain hasn't been decided yet. What's already established is
+the spec-driven-development agent/skill kit in this repo, and Lean 4 / TLA+
+as a cross-cutting formal-verification feedback harness used via the
+framework's coding-assistant agents rather than run by the service itself
+(see **Related** below) — that harness is domain-independent, not a preview
+of what this service tracks.
 
 ## Architecture
 
-```
-web/VerificationController        REST API (create / read / list jobs)
-  -> service/VerificationOrchestrationService   job CRUD, no execution
-       -> repository/VerificationJobRepository, VerificationResultRepository
-            -> domain/VerificationJob, VerificationResult   (Spring Data JPA)
-```
-
-A `VerificationResult` is appended to a job by whatever ran the check (today,
-an agent session — see **Related** below) rather than by this service itself.
+The service is currently a bare Spring Boot bootstrap
+(`Application.java`) — the domain/API layers that implement job tracking
+have not been (re)built yet. See `AGENTS.md`'s Project Structure and Code
+Style sections for the package-by-layer convention new code should follow.
 
 ## Prerequisites
 
 - Java 17+
 - A local PostgreSQL 16 instance (no container runtime required)
-- To actually verify a proof/spec: run the framework's `lean4-verifier` /
-  `tlaplus-verifier` agent from a coding-assistant session (needs a Lean 4
-  toolchain or a `tla2tools.jar` respectively) — this service only stores the
-  job and its result.
+- To run a Lean 4 proof or TLA+ model check: run the framework's
+  `lean4-verifier` / `tlaplus-verifier` agent from a coding-assistant session
+  (needs a Lean 4 toolchain or a `tla2tools.jar` respectively) — this
+  service never executes that toolchain itself (constitution Article I).
 
 ## Running locally
 
@@ -33,9 +30,9 @@ Install PostgreSQL locally and create the database/role the service expects
 (or override the env vars below to point at an existing instance):
 
 ```bash
-createdb verification
-psql -c "CREATE ROLE verification LOGIN PASSWORD 'verification';"
-psql -c "GRANT ALL PRIVILEGES ON DATABASE verification TO verification;"
+createdb formal_methods
+psql -c "CREATE ROLE formal_methods LOGIN PASSWORD 'formal_methods';"
+psql -c "GRANT ALL PRIVILEGES ON DATABASE formal_methods TO formal_methods;"
 ```
 
 Then run the service:
@@ -44,8 +41,9 @@ Then run the service:
 ./gradlew bootRun
 ```
 
-The service starts on `:8080`; Flyway applies `db/migration/V1__init_schema.sql`
-on boot.
+The service starts on `:8080`. No migration tool manages the schema — create
+any required tables in the database yourself; Hibernate only validates that
+the entity mappings match at startup.
 
 ## Configuration
 
@@ -54,46 +52,16 @@ Datasource settings are environment-overridable (see
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/verification` | PostgreSQL JDBC URL |
-| `SPRING_DATASOURCE_USERNAME` | `verification` | DB user |
-| `SPRING_DATASOURCE_PASSWORD` | `verification` | DB password |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/formal_methods` | PostgreSQL JDBC URL |
+| `SPRING_DATASOURCE_USERNAME` | `formal_methods` | DB user |
+| `SPRING_DATASOURCE_PASSWORD` | `formal_methods` | DB password |
 
 ## API
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/verification/jobs` | Create a job (status `PENDING`) |
-| `GET` | `/api/verification/jobs/{id}` | Job detail, including every past `VerificationResult` |
-| `GET` | `/api/verification/jobs?sensorType=&status=` | List/filter jobs (summary, no raw tool output) |
-
-Example — a Lean 4 proof:
-
-```bash
-curl -s -X POST localhost:8080/api/verification/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "reflexivity",
-    "sensorType": "LEAN4",
-    "sourceFileName": "T.lean",
-    "sourceContent": "theorem t : 1 = 1 := rfl"
-  }'
-# -> 201, { "id": 1, "status": "PENDING", ... }
-```
-
-Example — a TLA+ spec (`configContent` is required for `TLA_PLUS`; TLC cannot
-model-check a spec without its matching `.cfg`):
-
-```bash
-curl -s -X POST localhost:8080/api/verification/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "order-typeok",
-    "sensorType": "TLA_PLUS",
-    "sourceFileName": "OrderSpec.tla",
-    "sourceContent": "---- MODULE OrderSpec ----\n...\n====",
-    "configContent": "INVARIANT TypeOK"
-  }'
-```
+No REST API is implemented yet — the controller/service/repository layers
+described in `AGENTS.md` are pending (re)implementation. Actuator's
+`/actuator/health` and `/actuator/info` are reachable once the service is
+running (see Article II in the constitution).
 
 ## Testing
 
@@ -101,8 +69,8 @@ curl -s -X POST localhost:8080/api/verification/jobs \
 ./gradlew test
 ```
 
-- `VerificationOrchestrationServiceTest` — unit tests against a mocked
-  repository, so they run without a database.
+No test classes exist yet — see `AGENTS.md`'s Testing Discipline section
+for where new tests should live once code is added.
 
 ## Related: the kit's formal-methods agents
 
@@ -122,5 +90,5 @@ this Java service:
 
 They're mirrored to `.claude/agents/`, `.github/agents/`, and `.codex/agents/`
 by `scripts/mirror-agents.sh`/`.ps1` — use them from an agent session to draft
-or check a proof/spec file directly; use this service when you want
-verification jobs persisted, queryable, and exposed over HTTP.
+or check a proof/spec file directly, for whatever domain this service ends
+up serving.
