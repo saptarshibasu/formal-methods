@@ -1,0 +1,94 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+group = 'com.formalmethods'
+version = '0.1.0'
+description = 'Spring Boot service that tracks formal-methods verification jobs (Lean 4 proofs, TLA+ specs) persisted to PostgreSQL via Spring Data JPA.'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Web / REST
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Spring Data JPA
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // Bean validation for request DTOs
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Actuator: health/readiness probes
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // PostgreSQL driver
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Flyway: versioned schema migrations against PostgreSQL. Spring Boot 3.2.x
+    // manages Flyway 9.x, which bundles Postgres support directly in flyway-core —
+    // the separate flyway-database-postgresql module only exists from Flyway 10
+    // (Spring Boot 3.3+), so it isn't needed (or resolvable) here.
+    implementation 'org.flywaydb:flyway-core'
+
+    // Boilerplate reduction for entities/DTOs
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy tasks.named('jacocoTestReport')
+}
+
+// Coverage floor — memory/constitution.md's Development Workflow (90%
+// overall line coverage). jacocoTestCoverageVerification is NOT wired into
+// `check`/`build` by default (Jacoco's own out-of-the-box behavior) — run it
+// explicitly via the command AGENTS.md documents, same as `code-reviewer`
+// does for its coverage gate.
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+tasks.named('jacocoTestCoverageVerification') {
+    dependsOn tasks.named('jacocoTestReport')
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.90
+            }
+        }
+    }
+}
+
+// Static analysis / cognitive complexity — config/checkstyle/checkstyle.xml.
+// checkstyleMain/checkstyleTest ARE wired into `check` (Checkstyle plugin's
+// own default), so `./gradlew clean build` now also enforces this gate —
+// see AGENTS.md's Commands section for the updated meaning of "Build".
+checkstyle {
+    toolVersion = '10.17.0'
+    configFile = file('config/checkstyle/checkstyle.xml')
+}

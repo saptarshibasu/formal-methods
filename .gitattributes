@@ -1,0 +1,22 @@
+# Shell scripts must keep LF line endings — a CRLF shebang line breaks
+# execution under bash/sh even when the file is only ever edited on Windows.
+# Required by .agents/kit-manifest.conf's own note to adopters.
+*.sh text eol=lf
+*.bash text eol=lf
+*.ps1 text eol=lf
+
+# Generated mirrors of .agents/agents/ and .agents/skills/ (see
+# scripts/mirror-agents.sh / mirror-skills.sh) — never hand-edited, always
+# regenerated from the canonical .agents/ source. Marking them
+# linguist-generated collapses their diffs in GitHub's review UI; merge=ours
+# prefers the local side on conflict, since the correct resolution is always
+# "re-run the mirror script," never a manual line-by-line merge. The
+# `ours` driver itself is local git config (`git config merge.ours.driver
+# true`) — set that up per-clone if you want the merge=ours attribute to
+# actually take effect; .gitattributes alone only declares the intent.
+.claude/agents/** linguist-generated merge=ours
+.claude/skills/** linguist-generated merge=ours
+.codex/agents/** linguist-generated merge=ours
+.codex/skills/** linguist-generated merge=ours
+.github/agents/** linguist-generated merge=ours
+.github/skills/** linguist-generated merge=ours

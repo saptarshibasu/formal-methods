@@ -1,0 +1,12 @@
+build/
+.gradle/
+work/
+*.class
+.idea/
+*.iml
+.vscode/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Formal-verification toolchain — lives on the machine running the coding
+# assistant, never committed (see AGENTS.md's Formal Verification Tooling).
+tools/*.jar
