@@ -203,6 +203,14 @@ conflate "add a sensor type" with "add an agent" — see constitution Article I.
   feature's spec. To amend it, use `amend-constitution`.
 - Architecture decisions are recorded in `docs/adr/` (via `create-adr`) —
   check for an existing ADR before changing a cross-cutting pattern.
+- If `spec.md` has a Formal Verification Obligations section, `artifact-analyzer`
+  checks it during the Analyze phase — before any `.lean`/`.tla` file exists —
+  confirming `plan.md` names exactly one tool (Lean 4 xor TLA+) and a concrete
+  implementation target per obligation, and that `tasks.md` has a draft task
+  (naming the writer agent and file path) plus a verify task (naming the
+  verifier agent) for it. It checks that the *path* to the artifact is fully
+  laid, not the artifact's content — `lean4-verifier`/`tlaplus-verifier` check
+  that later, on the actual file, once it exists.
 
 ## Testing Discipline
 
