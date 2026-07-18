@@ -84,18 +84,23 @@ Verification Obligations names one for this story)*
 
 - [ ] TREVIEW Invoke the `code-reviewer` agent: pass `git diff main` (or equivalent), `specs/<NNN>/spec.md`, and `specs/<NNN>/decision-log.md`. Do not skip — if the user explicitly declines, record the skip in `decision-log.md`.
 
-`code-reviewer` runs three deterministic gates before its qualitative read —
-clean build, test coverage floor, static analysis / cognitive complexity
-(commands from `AGENTS.md`, thresholds from `memory/constitution.md`'s
-Quality Gates) — alongside spec/constitution conformance and security. If
-this feature has a Formal Verification Obligation, the caller also feeds it
-a fresh `lean4-verifier`/`tlaplus-verifier` report before invoking it. A
-failing gate is a Blocker like any other finding, tagged with a `Kind`:
-`defect` (e.g. broken build) routes to `debugger`, `design` (e.g. a
-complexity finding) routes to `implementor`, `coverage` (a gap below the
-floor) routes to `test-writer`, `formal` (an unverified theorem/spec) routes
-to the matching `lean4-theorem-writer`/`tlaplus-spec-writer` then the
-matching verifier — see `develop-feature`'s Phase 5 for the fix-loop.
+`code-reviewer` runs four deterministic gates before its qualitative read —
+clean build, test coverage floor, static analysis / cognitive complexity,
+formal verification obligations (commands from `AGENTS.md`, thresholds from
+`memory/constitution.md`'s Quality Gates) — alongside spec/constitution
+conformance, security, and — for a Formal Verification Obligation — a
+qualitative correspondence check between the formal artifact and the real
+implementation (`code-reviewer.md`'s own check, not something the verifier
+tool judges). If this feature has a Formal Verification Obligation, the
+caller also feeds it a fresh `lean4-verifier`/`tlaplus-verifier` report
+before invoking it. A failing gate is a Blocker like any other finding,
+tagged with a `Kind`: `defect` (e.g. broken build) routes to `debugger`,
+`design` (e.g. a complexity finding) routes to `implementor`, `coverage` (a
+gap below the floor) routes to `test-writer`, `formal` (a not-verified
+result, *or* a verified result whose correspondence to the real
+implementation doesn't hold up) routes to the matching
+`lean4-theorem-writer`/`tlaplus-spec-writer` then the matching verifier —
+see `develop-feature`'s Phase 5 for the fix-loop.
 
 On approval, append a **Review** row to `decision-log.md` (verdict + model used).
 
