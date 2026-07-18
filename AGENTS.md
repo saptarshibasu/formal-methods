@@ -182,24 +182,26 @@ observe — the following is a proposed default, not an inferred fact:
 
 ## Formal Verification Tooling
 
-Neither toolchain is installed in this environment (checked 2026-07-18: no
-`lean`/`lake`/`elan` on `PATH`; no `tla2tools.jar` found in the repo or via a
-disk-wide search, though that search isn't exhaustive). `lean4-verifier` /
-`tlaplus-verifier` will report an **environment error**, not a proof/spec
-failure, until one is set up — don't mistake one for the other. When a story
-first needs one:
+Both toolchains are installed on this machine and smoke-tested end-to-end
+(2026-07-18):
 
-- **Lean 4**: install a toolchain via `elan`
-  (https://github.com/leanprover/elan), then scaffold a `lakefile.lean` at
+- **Lean 4**: `elan` 4.2.3 at `~/.elan/bin` (on the user `PATH`; a shell
+  started before 2026-07-18 may need a restart to see it), default toolchain
+  `stable` = Lean 4.32.0 / Lake 5.0.0. No Lake project is scaffolded yet —
+  until one exists, check a single file with `lean <file>.lean`. When a
+  story first needs a proper proof project, scaffold a `lakefile.lean` at
   the repo root (or a dedicated Lake project under `Proofs/`) pinning the
-  version via `lean-toolchain`. Once it exists, document the exact build
-  command here — `lake build`, or `lake env lean <file>` for a single file —
-  so `lean4-verifier` uses it instead of guessing.
-- **TLA+**: place `tla2tools.jar` at `tools/tla2tools.jar` (already
-  `.gitignore`d — don't commit the jar itself). Once it exists, document the
-  exact invocation here — expected shape: `java -jar tools/tla2tools.jar
-  -workers auto -config <Spec>.cfg <Spec>.tla` — so `tlaplus-verifier` uses
-  it instead of guessing.
+  version via `lean-toolchain`, then update this entry to `lake build` /
+  `lake env lean <file>` so `lean4-verifier` uses it instead of guessing.
+- **TLA+**: TLC 2.19 at `tools/tla2tools.jar` (`.gitignore`d — don't commit
+  the jar itself; re-download from
+  https://github.com/tlaplus/tlaplus/releases if missing). Invocation for
+  `tlaplus-verifier`: `java -jar tools/tla2tools.jar -workers auto -config
+  <Spec>.cfg <Spec>.tla`.
+
+If `lean`/`lake` or the jar is missing, `lean4-verifier` /
+`tlaplus-verifier` report an **environment error**, not a proof/spec
+failure — don't mistake one for the other.
 
 Either toolchain lives on the machine running the coding-assistant agent,
 **never** as a `build.gradle` dependency or inside the deployed service —
