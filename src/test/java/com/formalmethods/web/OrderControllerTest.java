@@ -11,10 +11,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.formalmethods.domain.Order;
 import com.formalmethods.domain.OrderStatus;
+import com.formalmethods.domain.StatusHistoryEntry;
 import com.formalmethods.dto.StatusUpdateRequest;
 import com.formalmethods.service.IllegalTransitionException;
 import com.formalmethods.service.OrderNotFoundException;
 import com.formalmethods.service.OrderService;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -223,5 +226,30 @@ class OrderControllerTest {
 
         mockMvc.perform(post("/api/orders/{orderId}/cancel", orderId).contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isConflict());
+    }
+
+    /**
+     * US3 Acceptance Scenario 4 / FR-010: {@code GET
+     * /api/orders/{orderId}/history} returns 200 with the order's history
+     * entries in chronological order, per plan.md's REST surface ("200 OK
+     * List<HistoryEntryResponse> in chronological order"). Matters because
+     * this endpoint is the only externally observable way to confirm US3's
+     * "history never disagrees with current state" guarantee — a controller
+     * that returned entries out of order, or omitted the endpoint entirely,
+     * would make that guarantee unverifiable from outside the service.
+     */
+    @Test
+    void getHistoryReturns200WithEntriesInChronologicalOrder() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        Instant t1 = Instant.parse("2026-07-18T00:00:00Z");
+        Instant t2 = Instant.parse("2026-07-18T00:05:00Z");
+        StatusHistoryEntry first = new StatusHistoryEntry(orderId, OrderStatus.NEW, t1);
+        StatusHistoryEntry second = new StatusHistoryEntry(orderId, OrderStatus.INVENTORY_RESERVED, t2);
+        when(orderService.getHistory(orderId)).thenReturn(List.of(first, second));
+
+        mockMvc.perform(get("/api/orders/{orderId}/history", orderId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("NEW"))
+                .andExpect(jsonPath("$[1].status").value("INVENTORY_RESERVED"));
     }
 }

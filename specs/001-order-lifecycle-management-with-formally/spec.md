@@ -42,9 +42,11 @@ confirm the current state advances correctly; then attempt an illegal jump
    remains NEW.
 3. **Given** an order in state DELIVERED, **When** a CLOSED update is applied,
    **Then** the current state becomes CLOSED.
-4. **Given** an order in a terminal state (CLOSED or CANCELLED), **When** any
-   status update is applied, **Then** the update is rejected and the state
-   remains terminal.
+4. **Given** an order in a terminal state (CLOSED or CANCELLED), **When** a
+   status update **to a different target state** is applied, **Then** the
+   update is rejected and the state remains terminal. (A self-target duplicate
+   on a terminal order — e.g. CLOSED→CLOSED — is not a transition and is
+   governed by FR-011's idempotent no-op rule, not this scenario.)
 5. **Given** any existing order, **When** its current state is requested,
    **Then** the service returns the order's single current lifecycle state.
 
@@ -152,6 +154,11 @@ current state consistent afterward.
 
 - A status update naming a target state equal to the current state (no-op
   duplicate) — treated as an already-applied duplicate, not an error advance.
+  This holds even when the order is in a terminal state (e.g. CLOSED→CLOSED,
+  CANCELLED→CANCELLED): a self-target duplicate never moves the order, so it is
+  accepted as an idempotent no-op under FR-011, which takes precedence over US1
+  Scenario 4 for this specific case. Scenario 4's rejection continues to govern
+  a genuine transition attempt to a *different* target on a terminal order.
 - A cancel arriving after the order is already CANCELLED, or after it has
   reached CLOSED — rejected or absorbed, never re-releasing inventory.
 - A status update or cancel referencing an order that does not exist — rejected

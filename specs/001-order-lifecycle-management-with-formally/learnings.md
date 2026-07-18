@@ -141,3 +141,34 @@ mapping (already in place from US1/T016) needed zero changes for the cancel
 endpoint — `OrderService.cancel` reuses the same exception type, so the
 mapping was already generic enough to cover both endpoints. No deviation
 from plan.md.
+
+## 2026-07-18 — implementor — T026/T027/T028/T029
+
+US3 required putting the idempotent no-op check for `applyStatusUpdate`
+*before* the legality check, same reasoning as US2's cancel-idempotency
+entry above: `OrderLifecycle` has no self-loop edges (e.g. no
+`INVENTORY_RESERVED`→`INVENTORY_RESERVED`), so a re-delivered update whose
+target equals current status would otherwise be misclassified as illegal.
+Both `applyStatusUpdate` and `cancel` now append a `StatusHistoryEntry`
+(via `statusHistoryRepository.save`, previously injected-but-unused) in the
+same method as the `orderRepository.save`, and both methods are
+`@Transactional` (`org.springframework.transaction.annotation.Transactional`
+— no prior precedent for either import existed in the codebase before this
+story, picked Spring's for consistency with `@Service`) so state+history can
+never diverge (T026/FR-007/008). `getHistory` reuses the existing
+`findOrThrow` private helper before reading `statusHistoryRepository`, so
+the 404 mapping for a non-existent order id on read-history came for free
+via the same `OrderNotFoundException`→404 `ApiExceptionHandler` mapping
+T029 asked me to confirm rather than reimplement — confirmed by inspection
+and by all tests passing, no new exception-handler code needed.
+
+One test-coverage gap noted, not filled (per this agent's "never write a
+new test" rule): `OrderControllerTest` has an explicit 404 test for
+status-update (`applyStatusUpdateOnUnknownOrderReturns404`) and read-state
+(`getOrderForUnknownOrderReturns404`), but none for cancel or
+read-history on an unknown order id, even though T029 names all four
+operations. The underlying code path is identical (`findOrThrow` →
+`OrderNotFoundException` → the same `ApiExceptionHandler` mapping already
+covered by the existing tests), so I'm confident the behavior is correct,
+but the two missing controller tests are a real coverage gap for
+`test-writer` to close, not something I should add myself mid-implementation.

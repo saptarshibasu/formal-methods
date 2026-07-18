@@ -10,8 +10,11 @@ import static org.mockito.Mockito.when;
 
 import com.formalmethods.domain.Order;
 import com.formalmethods.domain.OrderStatus;
+import com.formalmethods.domain.StatusHistoryEntry;
 import com.formalmethods.repository.OrderRepository;
 import com.formalmethods.repository.StatusHistoryRepository;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -21,6 +24,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -314,5 +318,152 @@ class OrderServiceTest {
 
         assertThat(result.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         verify(inventoryReleaseClient, never()).release(any(UUID.class));
+    }
+
+    /**
+     * US3 Acceptance Scenario 1 / FR-007/FR-008: a valid, accepted status
+     * update appends exactly one {@link StatusHistoryEntry} for the order,
+     * recording the resulting status, and the order's current state equals
+     * that entry's state. Matters because an accepted transition that
+     * doesn't append a history entry (or appends the wrong status) would let
+     * the audit trail silently diverge from reality on the very first write
+     * — exactly the divergence FR-008 forbids.
+     */
+    @Test
+    void validStatusUpdateAppendsExactlyOneHistoryEntryMatchingCurrentState() {
+        Order order = orderWithStatus(OrderStatus.NEW);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(statusHistoryRepository.save(any(StatusHistoryEntry.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Order updated = orderService.applyStatusUpdate(orderId, OrderStatus.INVENTORY_RESERVED);
+
+        ArgumentCaptor<StatusHistoryEntry> captor = ArgumentCaptor.forClass(StatusHistoryEntry.class);
+        verify(statusHistoryRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getOrderId()).isEqualTo(orderId);
+        assertThat(captor.getValue().getStatus()).isEqualTo(OrderStatus.INVENTORY_RESERVED);
+        assertThat(updated.getStatus()).isEqualTo(captor.getValue().getStatus());
+    }
+
+    /**
+     * US3 Acceptance Scenario 2 / FR-007: a status update rejected as an
+     * illegal transition appends NO history entry, and the prior current
+     * state is retained. Matters because FR-007 explicitly forbids a
+     * rejected update from creating a history entry — if a rejected jump
+     * still wrote to history, the audit trail would record a transition that
+     * never actually took effect, itself a divergence from current state.
+     */
+    @Test
+    void illegalStatusUpdateAppendsNoHistoryEntry() {
+        Order order = orderWithStatus(OrderStatus.NEW);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.applyStatusUpdate(orderId, OrderStatus.DISPATCHED))
+                .isInstanceOf(IllegalTransitionException.class);
+
+        verify(statusHistoryRepository, never()).save(any());
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.NEW);
+    }
+
+    /**
+     * US3 Acceptance Scenario 3 / FR-011: re-delivering a status update whose
+     * target equals the order's current status (a retry/duplicate of an
+     * already-applied update) is accepted as a no-op — current state and
+     * history remain exactly as after the first application: no second
+     * history entry, no repeated persistence side effect. Matters because
+     * without this idempotent handling a re-delivered "advance to X" (at-
+     * least-once delivery, spec.md's Edge Cases) would either be wrongly
+     * rejected as illegal (no self-loop edge exists in {@code
+     * OrderLifecycle}) or, worse, silently double-append history — either
+     * way violating FR-011's "no additional state change, no additional
+     * history entry" guarantee.
+     */
+    @Test
+    void reDeliveredUpdateToCurrentStatusIsAcceptedAsNoOpWithNoNewHistoryEntry() {
+        Order order = orderWithStatus(OrderStatus.INVENTORY_RESERVED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        Order result = orderService.applyStatusUpdate(orderId, OrderStatus.INVENTORY_RESERVED);
+
+        assertThat(result.getStatus()).isEqualTo(OrderStatus.INVENTORY_RESERVED);
+        verify(statusHistoryRepository, never()).save(any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    /**
+     * Pins the human-decided precedence between FR-011 (duplicate-delivery
+     * idempotency) and US1 Scenario 4 ("any status update on a terminal
+     * order is rejected"): a self-target duplicate on CLOSED (CLOSED ->
+     * CLOSED) is accepted as a no-op, not rejected. Matters because the
+     * idempotency check in {@code applyStatusUpdate} runs unconditionally
+     * before the legality check, so a re-delivered update whose target
+     * equals CLOSED never actually moves the order anywhere — treating it
+     * as a no-op is harmless and consistent with FR-011's general rule. A
+     * genuine transition attempt to a *different* target on CLOSED remains
+     * rejected via the legality check, unaffected by this test (see
+     * statusUpdateOnClosedOrderIsRejectedAndStateUnchanged above).
+     */
+    @Test
+    void applyStatusUpdateWithSelfTargetOnClosedOrderIsAcceptedAsNoOp() {
+        Order order = orderWithStatus(OrderStatus.CLOSED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        Order result = orderService.applyStatusUpdate(orderId, OrderStatus.CLOSED);
+
+        assertThat(result.getStatus()).isEqualTo(OrderStatus.CLOSED);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(statusHistoryRepository, never()).save(any());
+    }
+
+    /**
+     * Pins the same FR-011-over-Scenario-4 precedence decision for the
+     * CANCELLED terminal state: a self-target duplicate (CANCELLED ->
+     * CANCELLED) is accepted as a no-op, not rejected. Matters for the same
+     * reason as the CLOSED case above — a self-target duplicate never moves
+     * the order, so it's harmless even on a terminal state; testing only
+     * CLOSED would leave this half of the precedence decision unverified.
+     */
+    @Test
+    void applyStatusUpdateWithSelfTargetOnCancelledOrderIsAcceptedAsNoOp() {
+        Order order = orderWithStatus(OrderStatus.CANCELLED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        Order result = orderService.applyStatusUpdate(orderId, OrderStatus.CANCELLED);
+
+        assertThat(result.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(statusHistoryRepository, never()).save(any());
+    }
+
+    /**
+     * US3 Acceptance Scenario 4 / FR-010: requesting an order's history
+     * returns its entries in chronological order, and the last entry's
+     * status equals the order's current state. Matters because
+     * chronological order is what makes the history usable as an audit
+     * trail at all — an out-of-order or incomplete read would make it
+     * impossible for a caller to verify "current state agrees with the
+     * latest entry" (FR-008), which is this story's headline guarantee.
+     */
+    @Test
+    void getHistoryReturnsEntriesInChronologicalOrderMatchingCurrentState() {
+        Order order = orderWithStatus(OrderStatus.PROVISIONED);
+        UUID orderId = order.getId();
+        Instant t1 = Instant.parse("2026-07-18T00:00:00Z");
+        Instant t2 = Instant.parse("2026-07-18T00:05:00Z");
+        StatusHistoryEntry first = new StatusHistoryEntry(orderId, OrderStatus.INVENTORY_RESERVED, t1);
+        StatusHistoryEntry second = new StatusHistoryEntry(orderId, OrderStatus.PROVISIONED, t2);
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(statusHistoryRepository.findByOrderIdOrderByIdAsc(orderId)).thenReturn(List.of(first, second));
+
+        List<StatusHistoryEntry> history = orderService.getHistory(orderId);
+
+        assertThat(history).containsExactly(first, second);
+        assertThat(history.get(history.size() - 1).getStatus()).isEqualTo(order.getStatus());
     }
 }

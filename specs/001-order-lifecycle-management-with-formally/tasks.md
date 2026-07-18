@@ -73,15 +73,15 @@
 
 ### Tests for User Story 3 — write first, confirm they fail
 
-- [ ] T024 [P] [US3] Write failing service tests in `src/test/java/com/formalmethods/service/OrderServiceTest.java` covering Acceptance Scenarios 1–4 (entry appended on accept and matches current state; no entry on reject; retry/duplicate produces no second entry/effect; chronological order with last entry matching current state).
-- [ ] T025 [P] [US3] Write failing controller test in `src/test/java/com/formalmethods/web/OrderControllerTest.java` for `GET /api/orders/{orderId}/history`.
+- [x] T024 [P] [US3] Write failing service tests in `src/test/java/com/formalmethods/service/OrderServiceTest.java` covering Acceptance Scenarios 1–4 (entry appended on accept and matches current state; no entry on reject; retry/duplicate produces no second entry/effect; chronological order with last entry matching current state).
+- [x] T025 [P] [US3] Write failing controller test in `src/test/java/com/formalmethods/web/OrderControllerTest.java` for `GET /api/orders/{orderId}/history`.
 
 ### Implementation for User Story 3
 
-- [ ] T026 [US3] Implement the atomic `@Transactional` append-history-and-update-state unit in `OrderService.applyStatusUpdate`/`cancel` so the two can never diverge, including across a crash or retry (FR-007/008) (depends on T024/T025 red).
-- [ ] T027 [US3] Implement idempotent no-op handling in `OrderService` — a target equal to current status (or a repeat cancel on an already-CANCELLED order) is an accepted no-op: no new history entry, no repeated side effect (FR-011) (depends on T026).
-- [ ] T028 [US3] Implement `GET /api/orders/{orderId}/history` endpoint in `OrderController.java` returning `List<HistoryEntryResponse>` in chronological order (FR-010) (depends on T026).
-- [ ] T029 [US3] Implement not-found handling (404, no order/history created) for status-update, cancel, read-state, and read-history on a non-existent order id across `OrderService`/`ApiExceptionHandler` (FR-015) (depends on T015, T022, T028).
+- [x] T026 [US3] Implement the atomic `@Transactional` append-history-and-update-state unit in `OrderService.applyStatusUpdate`/`cancel` so the two can never diverge, including across a crash or retry (FR-007/008) (depends on T024/T025 red).
+- [x] T027 [US3] Implement idempotent no-op handling in `OrderService` — a target equal to current status (or a repeat cancel on an already-CANCELLED order) is an accepted no-op: no new history entry, no repeated side effect (FR-011) (depends on T026).
+- [x] T028 [US3] Implement `GET /api/orders/{orderId}/history` endpoint in `OrderController.java` returning `List<HistoryEntryResponse>` in chronological order (FR-010) (depends on T026).
+- [x] T029 [US3] Implement not-found handling (404, no order/history created) for status-update, cancel, read-state, and read-history on a non-existent order id across `OrderService`/`ApiExceptionHandler` (FR-015) (depends on T015, T022, T028).
 
 **Checkpoint**: User Stories 1, 2, and 3 all work independently; history/state consistency holds under retry.
 

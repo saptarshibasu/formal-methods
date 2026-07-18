@@ -1,9 +1,11 @@
 package com.formalmethods.web;
 
+import com.formalmethods.dto.HistoryEntryResponse;
 import com.formalmethods.dto.OrderResponse;
 import com.formalmethods.dto.StatusUpdateRequest;
 import com.formalmethods.service.OrderService;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,8 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * REST surface for User Story 1 (plan.md's REST surface section):
- * create, apply a status update, and read current state — and User Story 2:
- * cancel.
+ * create, apply a status update, and read current state — User Story 2:
+ * cancel — and User Story 3: read status history.
  */
 @RestController
 @RequestMapping("/api/orders")
@@ -52,6 +54,14 @@ public class OrderController {
     @PostMapping("/{orderId}/cancel")
     public ResponseEntity<OrderResponse> cancelOrder(@PathVariable UUID orderId) {
         OrderResponse response = OrderResponse.from(orderService.cancel(orderId));
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{orderId}/history")
+    public ResponseEntity<List<HistoryEntryResponse>> getHistory(@PathVariable UUID orderId) {
+        List<HistoryEntryResponse> response = orderService.getHistory(orderId).stream()
+                .map(HistoryEntryResponse::from)
+                .toList();
         return ResponseEntity.ok(response);
     }
 }
