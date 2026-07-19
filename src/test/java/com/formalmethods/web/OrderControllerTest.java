@@ -122,6 +122,36 @@ class OrderControllerTest {
     }
 
     /**
+     * [US2/US3/US4] Formal Verification Obligation / FR-006: {@code POST
+     * /api/orders/{orderId}/status} with {@code targetStatus: CANCELLED}
+     * MUST return 409, not 200, matching the existing
+     * {@link IllegalTransitionException} -> 409 mapping. Matters because a
+     * bug found by {@code tlaplus-spec-writer} modeling this invariant shows
+     * the generic status-update endpoint currently accepts CANCELLED as a
+     * target and silently skips the inventory release that only the
+     * dedicated {@code /cancel} endpoint performs — a client using this
+     * endpoint to cancel an order with reserved inventory would see a false
+     * 200 while inventory is never released, corrupting FR-006's
+     * exactly-once-release guarantee. This test pins the service-level
+     * rejection ({@code OrderServiceTest}) is actually surfaced to callers as
+     * 409, not silently swallowed or mapped to success by the controller.
+     */
+    @Test
+    void applyStatusUpdateToCancelledReturns409() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        when(orderService.applyStatusUpdate(eq(orderId), eq(OrderStatus.CANCELLED)))
+                .thenThrow(new IllegalTransitionException("CANCELLED is not a legal status-update target"));
+
+        StatusUpdateRequest request = new StatusUpdateRequest();
+        request.setTargetStatus(OrderStatus.CANCELLED);
+
+        mockMvc.perform(post("/api/orders/{orderId}/status", orderId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict());
+    }
+
+    /**
      * FR-015 / Edge Case ("references an order that does not exist"): a
      * status update against a non-existent order returns 404 per plan.md's
      * HTTP code mapping. Matters because FR-015 requires this rejected

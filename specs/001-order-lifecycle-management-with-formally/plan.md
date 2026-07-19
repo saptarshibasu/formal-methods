@@ -63,7 +63,7 @@ concurrent protocol's safety and liveness are model-checked in TLA+
     exhaustively over all states and events, not by sampled cases.
   - **[US2/US3/US4] — TLA+** (concurrent-interleaving safety + [US4] liveness;
     TLC's strength). Models the `OrderService` mutation protocol for a single
-    order. Artifacts: `Specs/OrderLifecycle.tla` + `Specs/OrderLifecycle.cfg`.
+    order. Artifacts: `tla/OrderLifecycle.tla` + `tla/OrderLifecycle.cfg`.
     The spec represents a fixed set of concurrent actor processes issuing
     status-update and cancel actions against state variables `currentStatus`,
     `history` (a sequence of statuses), `inventoryReserved` (bool), and
@@ -91,7 +91,7 @@ concurrent protocol's safety and liveness are model-checked in TLA+
 <!-- GATE: must pass before research/design starts; re-check after. -->
 
 - [x] **Article I (tool-execution boundary)** — PASS. The Lean 4 proof and TLA+
-      spec are static artifacts under `Proofs/` and `Specs/`, verified by the
+      spec are static artifacts under `Proofs/` and `tla/`, verified by the
       framework agents outside the service. No Java class invokes a verification
       tool; no toolchain is added to `build.gradle`.
 - [x] **Article II (reachable & observable)** — PASS. All five operations are
@@ -164,7 +164,7 @@ src/test/java/com/formalmethods/         # package-mirrored unit tests (Mockito)
 Proofs/
 └── OrderTransition.lean                 # [US1] Lean 4 proof (single file; `lean <file>`)
 
-Specs/
+tla/
 ├── OrderLifecycle.tla                   # [US2/US3/US4] TLA+ spec
 └── OrderLifecycle.cfg                   # TLC config (constants, invariants, PROPERTY)
 ```
@@ -172,9 +172,11 @@ Specs/
 **Structure Decision**: Package-by-layer under the existing
 `com.formalmethods` root (`domain`/`dto`/`repository`/`service`/`web`/`config`)
 per `AGENTS.md` — no new top-level package, no second Gradle module. Formal
-artifacts live in capitalized `Proofs/` and `Specs/` directories at the repo
-root (per the plan template's convention; the lowercase `specs/` tree is
-reserved for this feature's spec/plan/tasks). No Lake project is scaffolded yet,
+artifacts live in `Proofs/` (Lean 4) and `tla/` (TLA+) directories at the repo
+root; the lowercase `specs/` tree is reserved for this feature's
+spec/plan/tasks. `tla/` is deliberately case-distinct from `specs/` to avoid a
+collision on a case-insensitive filesystem (a capitalized `Specs/` would be the
+same directory as `specs/` on Windows). No Lake project is scaffolded yet,
 so `OrderTransition.lean` is a single file checked with `lean <file>` (per
 `AGENTS.md` Formal Verification Tooling); if a later story needs a proof project
 this can migrate to `lake build`. DDL scripts go under

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,7 +61,12 @@ public class OrderService {
      * state change, no history entry, no repeated side effect. FR-007/008:
      * an accepted transition updates state and appends exactly one history
      * entry atomically, so the two can never diverge, even across a crash or
-     * retry.
+     * retry. FR-006: a {@code CANCELLED} target that would actually move the
+     * order is rejected here even though {@link OrderLifecycle} legalizes the
+     * edge — this generic path never releases inventory, so cancellation
+     * must go through the dedicated {@code POST /cancel} endpoint
+     * ({@link #cancel(UUID)}) instead; an order already CANCELLED still
+     * accepts a same-status no-op per the idempotency rule above.
      */
     @Transactional
     public Order applyStatusUpdate(UUID orderId, OrderStatus targetStatus) {
@@ -69,6 +75,13 @@ public class OrderService {
         if (order.getStatus() == targetStatus) {
             LOG.info("action=applyStatusUpdate order={} to={} outcome=accepted(idempotent)", orderId, targetStatus);
             return order;
+        }
+
+        if (targetStatus == OrderStatus.CANCELLED) {
+            LOG.warn("action=applyStatusUpdate order={} to=CANCELLED outcome=rejected reason=use_cancel_endpoint",
+                    orderId);
+            throw new IllegalTransitionException(
+                    "use POST /cancel to cancel an order " + orderId);
         }
 
         if (!OrderLifecycle.isLegalTransition(order.getStatus(), targetStatus)) {
@@ -81,7 +94,15 @@ public class OrderService {
         order.setStatus(targetStatus);
         Instant now = Instant.now();
         order.setUpdatedAt(now);
-        Order saved = orderRepository.save(order);
+        Order saved;
+        try {
+            saved = orderRepository.saveAndFlush(order);
+        } catch (ObjectOptimisticLockingFailureException ex) {
+            LOG.warn("action=applyStatusUpdate order={} to={} outcome=rejected reason=concurrent_update",
+                    orderId, targetStatus);
+            throw new ConcurrentUpdateException(
+                    "concurrent update conflict for order " + orderId + " to " + targetStatus);
+        }
         statusHistoryRepository.save(new StatusHistoryEntry(orderId, targetStatus, now));
         LOG.info("action=applyStatusUpdate order={} to={} outcome=accepted", orderId, targetStatus);
         return saved;
@@ -129,7 +150,13 @@ public class OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         Instant now = Instant.now();
         order.setUpdatedAt(now);
-        Order saved = orderRepository.save(order);
+        Order saved;
+        try {
+            saved = orderRepository.saveAndFlush(order);
+        } catch (ObjectOptimisticLockingFailureException ex) {
+            LOG.warn("action=cancel order={} outcome=rejected reason=concurrent_update", orderId);
+            throw new ConcurrentUpdateException("concurrent update conflict cancelling order " + orderId);
+        }
         statusHistoryRepository.save(new StatusHistoryEntry(orderId, OrderStatus.CANCELLED, now));
 
         if (shouldReleaseInventory) {

@@ -92,19 +92,19 @@
 
 ### Tests for User Story 4 — write first, confirm they fail
 
-- [ ] T030 [P] [US4] Write failing tests in `src/test/java/com/formalmethods/service/OrderServiceTest.java` for duplicate delivery (Scenario 1: duplicate INVENTORY_RESERVED produces no additional state change/entry) and premature/out-of-order delivery (Scenario 2: PROVISIONED before INVENTORY_RESERVED is rejected, order stays NEW).
-- [ ] T031 [P] [US4] Write a failing concurrency test in `OrderServiceTest.java` that drives the mocked `OrderRepository` to throw `ObjectOptimisticLockingFailureException` on the losing write, asserting exactly one of two conflicting concurrent updates (e.g. DISPATCHED vs. cancel) is accepted and history/state remain consistent (Scenario 3, FR-013).
+- [x] T030 [P] [US4] Write failing tests in `src/test/java/com/formalmethods/service/OrderServiceTest.java` for duplicate delivery (Scenario 1: duplicate INVENTORY_RESERVED produces no additional state change/entry) and premature/out-of-order delivery (Scenario 2: PROVISIONED before INVENTORY_RESERVED is rejected, order stays NEW).
+- [x] T031 [P] [US4] Write a failing concurrency test in `OrderServiceTest.java` that drives the mocked `OrderRepository` to throw `ObjectOptimisticLockingFailureException` on the losing write, asserting exactly one of two conflicting concurrent updates (e.g. DISPATCHED vs. cancel) is accepted and history/state remain consistent (Scenario 3, FR-013).
 
 ### Implementation for User Story 4
 
-- [ ] T032 [US4] Implement optimistic-lock conflict handling in `OrderService` — catch `ObjectOptimisticLockingFailureException` from the `@Version`-guarded write and map it to a rejection (depends on T030/T031 red, Foundational T006's `@Version`).
-- [ ] T033 [US4] Map the optimistic-lock rejection to HTTP 409 in `ApiExceptionHandler`/`OrderController` for the status-update and cancel endpoints (depends on T032).
-- [ ] T034 [US4] Confirm and extend the idempotency (T027) and out-of-order-rejection paths across `applyStatusUpdate`/`cancel` so duplicate and premature deliveries are absorbed without corrupting state or history (FR-012) (depends on T027, T032).
+- [x] T032 [US4] Implement optimistic-lock conflict handling in `OrderService` — catch `ObjectOptimisticLockingFailureException` from the `@Version`-guarded write and map it to a rejection (depends on T030/T031 red, Foundational T006's `@Version`).
+- [x] T033 [US4] Map the optimistic-lock rejection to HTTP 409 in `ApiExceptionHandler`/`OrderController` for the status-update and cancel endpoints (depends on T032).
+- [x] T034 [US4] Confirm and extend the idempotency (T027) and out-of-order-rejection paths across `applyStatusUpdate`/`cancel` so duplicate and premature deliveries are absorbed without corrupting state or history (FR-012) (depends on T027, T032).
 
 ### Formal Verification for User Story 4 (covers spec.md's [US2/US3/US4] safety and [US4] liveness obligations)
 
-- [ ] T034a [US2/US3/US4] Draft the TLA+ spec and config modeling the concurrent mutation protocol via `tlaplus-spec-writer` — safety invariants (a) `currentStatus = Last(history)` always, (b) history append-only with no illegal transition, (c) exactly-once effect per logical transition, (d) `inventoryReleaseCount ≤ 1` and only for a qualifying cancellation, (e) at most one of two conflicting concurrent updates accepted; plus the [US4] liveness property (every reachable non-terminal state eventually reaches CLOSED or CANCELLED under fair delivery) — `Specs/OrderLifecycle.tla` and `Specs/OrderLifecycle.cfg`.
-- [ ] T034b [US2/US3/US4] Verify via `tlaplus-verifier`; on a failing read, hand the diagnostic back to T034a for one revision round before re-verifying (see `develop-feature` Phase 4).
+- [x] T034a [US2/US3/US4] Draft the TLA+ spec and config modeling the concurrent mutation protocol via `tlaplus-spec-writer` — safety invariants (a) `currentStatus = Last(history)` always, (b) history append-only with no illegal transition, (c) exactly-once effect per logical transition, (d) `inventoryReleaseCount ≤ 1` and only for a qualifying cancellation, (e) at most one of two conflicting concurrent updates accepted; plus the [US4] liveness property (every reachable non-terminal state eventually reaches CLOSED or CANCELLED under fair delivery) — `tla/OrderLifecycle.tla` and `tla/OrderLifecycle.cfg` (path corrected from plan.md's original `Specs/` — see decision-log's Plan (amendment) row: `Specs/`/`specs/` collide on a case-insensitive filesystem).
+- [x] T034b [US2/US3/US4] Verify via `tlaplus-verifier`; on a failing read, hand the diagnostic back to T034a for one revision round before re-verifying (see `develop-feature` Phase 4).
 
 **Checkpoint**: All four user stories work independently and together; concurrent/duplicate/out-of-order behavior is formally model-checked.
 

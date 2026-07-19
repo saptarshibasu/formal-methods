@@ -1,6 +1,7 @@
 package com.formalmethods.web;
 
 import com.formalmethods.dto.ErrorResponse;
+import com.formalmethods.service.ConcurrentUpdateException;
 import com.formalmethods.service.IllegalTransitionException;
 import com.formalmethods.service.OrderNotFoundException;
 import org.slf4j.Logger;
@@ -34,6 +35,13 @@ public class ApiExceptionHandler {
     public ResponseEntity<ErrorResponse> handleIllegalTransition(IllegalTransitionException ex) {
         LOG.warn("outcome=rejected reason=illegal_transition detail={}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("illegal transition"));
+    }
+
+    /** FR-013: a losing optimistic-lock write on a status-update or cancel maps to 409. */
+    @ExceptionHandler(ConcurrentUpdateException.class)
+    public ResponseEntity<ErrorResponse> handleConcurrentUpdate(ConcurrentUpdateException ex) {
+        LOG.warn("outcome=rejected reason=concurrent_update detail={}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("concurrent update conflict"));
     }
 
     /**

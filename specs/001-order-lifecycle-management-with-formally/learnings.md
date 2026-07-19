@@ -172,3 +172,109 @@ operations. The underlying code path is identical (`findOrThrow` →
 covered by the existing tests), so I'm confident the behavior is correct,
 but the two missing controller tests are a real coverage gap for
 `test-writer` to close, not something I should add myself mid-implementation.
+
+## 2026-07-18 — implementor — T032/T033/T034
+
+`ConcurrentUpdateException` (new, RuntimeException, sibling to
+`IllegalTransitionException`) is thrown from both `applyStatusUpdate` and
+`cancel` by wrapping the `orderRepository.save(order)` call in a try/catch
+for `ObjectOptimisticLockingFailureException` — placed *before* the
+`statusHistoryRepository.save` call in each method, so a losing optimistic-
+lock race can never leave a history entry behind. `ApiExceptionHandler` maps
+it to 409 via the same pattern as the existing `IllegalTransitionException`
+handler. T034's "confirm and extend" scope required no new code: T030a
+(duplicate delivery) and T030b (premature/out-of-order delivery) both
+already pass under existing US1/US3 logic (the idempotency no-op check and
+`OrderLifecycle.isLegalTransition` both run unconditionally before any
+write, regardless of *why* the caller is duplicating/out-of-ordering) —
+verified by reading the code, not just trusting the test-writer's report.
+
+## 2026-07-18 — implementor/debugger — CANCELLED-via-status-update bug (found by tlaplus-spec-writer)
+
+Formal modeling for T034a caught a real production bug before it ever
+reached TLC: `OrderService.applyStatusUpdate` accepted `targetStatus:
+CANCELLED` (a legal edge in `OrderLifecycle`'s table, needed for the
+dedicated `/cancel` endpoint's own legality check) but never called
+`InventoryReleaseClient.release` — only `OrderService.cancel` does. An order
+could be moved to CANCELLED via the generic status-update endpoint,
+skipping inventory release entirely, corrupting the exactly-once-release
+guarantee (FR-006). Fixed by rejecting `CANCELLED` as an `applyStatusUpdate`
+target (throws the existing `IllegalTransitionException`) whenever it would
+actually move the order. Check-ordering subtlety: this rejection must come
+*after* the existing same-status idempotency check, not before — a
+`CANCELLED→CANCELLED` self-target duplicate must still no-op per FR-011
+(from the US3 idempotency work), so the final order in `applyStatusUpdate`
+is: (1) same-status no-op, (2) reject if target is CANCELLED (would-move
+case only), (3) `OrderLifecycle.isLegalTransition`, (4) save + history-append.
+`OrderLifecycle.java` and `OrderService.cancel` were deliberately left
+untouched — the fix is specific to the status-update path, not the
+underlying transition table.
+
+## 2026-07-18 — tlaplus-spec-writer/tlaplus-verifier — T034a/T034b formal verification
+
+Drafted `tla/OrderLifecycle.tla`/`.cfg` modeling the concurrent mutation
+protocol: 2 callers, optimistic-lock arbitration (only one of two
+same-step racing writes to the shared order succeeds, matching
+`ConcurrentUpdateException`'s real effect), unrestricted target choice on
+read (modeling at-least-once/duplicated/delayed/out-of-order delivery).
+The first draft, before the CANCELLED-bug fix landed, faithfully exposed
+that same bug as a TLC-checkable invariant-(d) violation rather than
+narrowing the model to avoid it — confirming the model was built honestly
+against the real (buggy) code, then revised to match after the fix.
+First real TLC run (post-fix): `TypeOK` + all 5 safety invariants
+verified exhaustively (163,129 states generated, 23,212 distinct, 0 left
+on queue), but `Liveness` violated — a lasso counterexample where a caller
+perpetually "blinks" the legal-progress action's enabledness (alternating
+self-target and illegal-target reads) so weak fairness (`WF_vars`) never
+obligates it to fire, stalling the order at DELIVERED forever. Fixed by
+strengthening `WF_vars`→`SF_vars` on the two legal-progress read actions
+only (strong fairness requires infinitely-often-enabled, not continuously-
+enabled, which matches the actual recurrence in the counterexample) —
+`CommitUpdate`/`CommitCancel` didn't need strengthening since nothing
+re-disables them once a caller enters its pending-write mode. Re-verify:
+exit 0, all invariants + Liveness hold, no regression. Also note for future
+sessions: TLC resolves the `.tla` module name against its CWD regardless of
+the path passed as the argument — must `cd` into the directory containing
+the spec before invoking `java -jar tools/tla2tools.jar ...`, not just pass
+a relative path from elsewhere.
+
+## 2026-07-18 — orchestrator — accidental specs/ deletion during TLA+ directory rename, fully recovered
+
+While relocating the TLA+ artifacts (first attempted as `Specs/`, discovered
+to collide with `specs/` on this case-insensitive filesystem, see the
+decision-log's Plan (amendment) row), an `rm -rf specs/states Specs`
+command deleted the entire `specs/` tree — including this feature's
+`spec.md`/`plan.md`/`tasks.md`/`decision-log.md`/`research.md`/
+`learnings.md` — because `Specs` and `specs` resolve to the identical
+directory here. Fully recovered via `git checkout -- specs/` from the last
+commit (`4609ebd`, US3) with zero data loss to committed content; the only
+casualty was this session's not-yet-committed decision-log rows and
+learnings entries for US4's work, which were manually reconstructed from
+conversation context afterward. Lesson: never pass a path that might
+case-collide with another real path to `rm -rf` in the same command,
+especially on Windows — verify collisions with a harmless write-test first
+(as was done, but only *after* the deletion, not before).
+
+## 2026-07-18 — implementor — code-reviewer defect fix on US4 diff (saveAndFlush)
+
+`code-reviewer` flagged that `applyStatusUpdate`/`cancel`'s
+`ObjectOptimisticLockingFailureException` catch (from the T032/T033/T034
+entry above) wrapped a plain `orderRepository.save(order)` — under real JPA
+the `@Version` check fires at flush time, and `save()` on a managed entity
+doesn't force one, so the actual exception could surface later (at the next
+repository call, or at `@Transactional` commit) *outside* the try/catch,
+producing an uncaught exception → 500 instead of the required 409 (FR-013).
+State integrity was never at risk (the transaction still rolls back either
+way) — this was purely an HTTP-contract gap on the race path, and Mockito's
+mocked `save()` in the existing tests couldn't have caught it since a mock
+doesn't model flush timing at all. Fix: changed both call sites to
+`orderRepository.saveAndFlush(order)`, forcing the version check synchronously
+within the catch scope. `OrderRepository` needed no interface change —
+`saveAndFlush` is inherited from `JpaRepository`. Updated the six
+`OrderServiceTest` stubs that exercise `applyStatusUpdate`/`cancel` from
+`when(orderRepository.save(...))` to `when(orderRepository.saveAndFlush(...))`
+(mechanical stub-target change only, same assertions) — `create()`'s stub at
+line 74 was intentionally left as `save()` since `OrderService.create` itself
+was not touched by this fix. All targeted test classes
+(`OrderLifecycleTest`, `OrderServiceTest`, `OrderControllerTest`) pass after
+the change.

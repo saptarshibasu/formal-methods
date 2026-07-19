@@ -27,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 /**
  * Service-level tests for User Story 1 (Drive an order through its valid
@@ -90,7 +91,7 @@ class OrderServiceTest {
         Order order = orderWithStatus(OrderStatus.NEW);
         UUID orderId = order.getId();
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Order updated = orderService.applyStatusUpdate(orderId, OrderStatus.INVENTORY_RESERVED);
 
@@ -112,7 +113,7 @@ class OrderServiceTest {
         Order order = orderWithStatus(from);
         UUID orderId = order.getId();
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Order updated = orderService.applyStatusUpdate(orderId, to);
 
@@ -161,7 +162,7 @@ class OrderServiceTest {
         Order order = orderWithStatus(OrderStatus.DELIVERED);
         UUID orderId = order.getId();
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Order updated = orderService.applyStatusUpdate(orderId, OrderStatus.CLOSED);
 
@@ -240,7 +241,7 @@ class OrderServiceTest {
         Order order = orderWithStatus(OrderStatus.NEW);
         UUID orderId = order.getId();
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Order cancelled = orderService.cancel(orderId);
 
@@ -263,7 +264,7 @@ class OrderServiceTest {
         Order order = orderWithStatus(from);
         UUID orderId = order.getId();
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Order cancelled = orderService.cancel(orderId);
 
@@ -334,7 +335,7 @@ class OrderServiceTest {
         Order order = orderWithStatus(OrderStatus.NEW);
         UUID orderId = order.getId();
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(statusHistoryRepository.save(any(StatusHistoryEntry.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -465,5 +466,137 @@ class OrderServiceTest {
 
         assertThat(history).containsExactly(first, second);
         assertThat(history.get(history.size() - 1).getStatus()).isEqualTo(order.getStatus());
+    }
+
+    /**
+     * US4 Acceptance Scenario 1 / FR-011 (T030a): given an order already in
+     * INVENTORY_RESERVED, delivering a duplicate INVENTORY_RESERVED update
+     * (simulating an upstream warehouse system's at-least-once redelivery,
+     * not merely a generic client retry) produces no additional state change
+     * and no additional history entry — no {@code orderRepository.save} and
+     * no {@code statusHistoryRepository.save} call at all. Matters because
+     * US4 frames this as a distinct at-least-once-delivery correctness
+     * requirement (spec.md's "Why this priority") separate from US3's
+     * general idempotency mechanism — if the two ever diverged (e.g. a
+     * future change special-cased "retry" detection instead of relying on
+     * the target-equals-current-status no-op), a redelivered upstream
+     * duplicate could silently double-apply a side effect that a bare
+     * client-retry test would never exercise.
+     */
+    @Test
+    void duplicateInventoryReservedDeliveryFromUpstreamProducesNoAdditionalEffect() {
+        Order order = orderWithStatus(OrderStatus.INVENTORY_RESERVED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        Order result = orderService.applyStatusUpdate(orderId, OrderStatus.INVENTORY_RESERVED);
+
+        assertThat(result.getStatus()).isEqualTo(OrderStatus.INVENTORY_RESERVED);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(statusHistoryRepository, never()).save(any());
+    }
+
+    /**
+     * US4 Acceptance Scenario 2 / FR-012 (T030b): given an order in NEW, a
+     * PROVISIONED update arriving before the INVENTORY_RESERVED update it
+     * depends on (an out-of-order upstream delivery — e.g. provisioning's
+     * callback racing ahead of the warehouse's) is rejected, and the order
+     * stays in NEW. Matters because US4 explicitly calls this out as its own
+     * acceptance scenario (delayed/out-of-order upstream delivery, not just
+     * "any illegal jump" from US1) — if a future change relaxed the
+     * transition table to tolerate "catch-up" jumps for convenience, this
+     * test pins that a premature update must still be rejected outright
+     * rather than silently reordered or accepted.
+     */
+    @Test
+    void prematureProvisionedUpdateBeforeInventoryReservedIsRejectedAndOrderStaysNew() {
+        Order order = orderWithStatus(OrderStatus.NEW);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.applyStatusUpdate(orderId, OrderStatus.PROVISIONED))
+                .isInstanceOf(IllegalTransitionException.class);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.NEW);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(statusHistoryRepository, never()).save(any());
+    }
+
+    /**
+     * US4 Acceptance Scenario 3 / FR-013 (T031): given an order in
+     * PROVISIONED, a DISPATCHED status update racing a concurrent cancel on
+     * a different service instance is modeled by having the mocked
+     * {@link OrderRepository#save} throw
+     * {@link ObjectOptimisticLockingFailureException} on the losing write
+     * (the shared row's {@code @Version} column is the arbiter per plan.md —
+     * whichever writer commits first wins, the other's save fails this way).
+     * The losing {@code applyStatusUpdate(DISPATCHED)} call MUST surface as
+     * a domain-level {@link ConcurrentUpdateException} — not the raw Spring
+     * exception propagating uncaught — and MUST NOT have appended a history
+     * entry. Matters because FR-013 requires that of two conflicting
+     * concurrent updates at most one is accepted, with history and current
+     * state remaining mutually consistent afterward; an uncaught
+     * {@code ObjectOptimisticLockingFailureException} leaking past
+     * {@code OrderService} would (a) not map to any defined client-facing
+     * rejection (breaking plan.md's "maps to HTTP 409" design) and (b) risk
+     * a partially-applied write if a caller mistakenly treated the raw
+     * Spring exception as retryable without knowing the transition never
+     * took effect.
+     *
+     * <p>Exception-naming decision for implementor (T032): this test
+     * expects a new {@code com.formalmethods.service.ConcurrentUpdateException}
+     * (a {@code RuntimeException}, sibling to {@link IllegalTransitionException})
+     * that {@code OrderService} throws after catching
+     * {@code ObjectOptimisticLockingFailureException} from the repository
+     * save — it does not yet exist, so this test is red on a missing-symbol
+     * compile error until T032 introduces it.
+     */
+    @Test
+    void concurrentDispatchedUpdateLosingOptimisticLockRaceIsRejectedNotRawSpringException() {
+        Order order = orderWithStatus(OrderStatus.PROVISIONED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.saveAndFlush(any(Order.class)))
+                .thenThrow(new ObjectOptimisticLockingFailureException(Order.class, orderId));
+
+        assertThatThrownBy(() -> orderService.applyStatusUpdate(orderId, OrderStatus.DISPATCHED))
+                .isInstanceOf(ConcurrentUpdateException.class);
+
+        verify(statusHistoryRepository, never()).save(any());
+    }
+
+    /**
+     * [US2/US3/US4] Formal Verification Obligation / FR-006: a bug found by
+     * {@code tlaplus-spec-writer} while modeling the invariant "inventory is
+     * released exactly once, and only via the dedicated cancel path" —
+     * {@code applyStatusUpdate(orderId, CANCELLED)} against an order at
+     * INVENTORY_RESERVED (inventory already reserved) MUST be rejected with
+     * {@link IllegalTransitionException}, leaving the order's state
+     * unchanged, appending no history entry, and — the crux of the bug —
+     * never invoking {@link InventoryReleaseClient#release}. Matters because
+     * {@code OrderLifecycle.isLegalTransition} still legally admits
+     * INVENTORY_RESERVED/PROVISIONED -> CANCELLED (needed for the dedicated
+     * {@code /cancel} endpoint), so today nothing in {@code
+     * applyStatusUpdate} excludes CANCELLED as a status-update target: the
+     * generic status-update path silently moves the order to CANCELLED
+     * without ever calling the release client, corrupting the exactly-once
+     * inventory-release guarantee that only {@code OrderService.cancel}
+     * currently upholds. Without this rejection, reserved inventory is
+     * leaked (never released, never re-reservable) for every order cancelled
+     * through {@code POST /status} instead of {@code POST /cancel}.
+     */
+    @Test
+    void applyStatusUpdateToCancelledIsRejectedAndNeverReleasesInventory() {
+        Order order = orderWithStatus(OrderStatus.INVENTORY_RESERVED);
+        UUID orderId = order.getId();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.applyStatusUpdate(orderId, OrderStatus.CANCELLED))
+                .isInstanceOf(IllegalTransitionException.class);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.INVENTORY_RESERVED);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(statusHistoryRepository, never()).save(any());
+        verify(inventoryReleaseClient, never()).release(any(UUID.class));
     }
 }
