@@ -1,0 +1,23 @@
+{
+  "_comment": "Example MCP server config. Copy to .mcp.json and trim to what you actually use. Keep the active set SMALL: more than ~5-7 connected servers measurably degrades agent performance through tool bloat. Secrets come from env vars (${VAR}), never inline.",
+
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"]
+    },
+
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
